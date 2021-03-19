@@ -1,9 +1,13 @@
 import socket
 import re
 import concurrent.futures
+from pprint import pformat
 from .unrealserver import UnrealServer
 
-from pdb import set_trace as st
+# Setup Logger
+import logging
+logger = logging.getLogger(__name__)
+logger.addHandler(logging.NullHandler())
 
 class UnrealMasterServer(object):
     
@@ -11,7 +15,7 @@ class UnrealMasterServer(object):
         self,
         hostname,
         port,
-        timeout=5,
+        **kwargs,
     ):
         """
             UnrealMasterServer class init statement
@@ -27,8 +31,20 @@ class UnrealMasterServer(object):
         self.port = port
         self.servers = []
 
+        if 'logger' not in kwargs:
+            self.logger = logger
+        else:
+            self.logger = kwargs['logger']
+
+        if 'timeout' not in kwargs:
+            self.timeout = 5
+        else:
+            self.timeout = kwargs['timeout']
+
+        self.logger.debug(f'Passed kwargs: {kwargs}')
+
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.sock.settimeout(timeout)
+        self.sock.settimeout(self.timeout)
         self.server = (self.hostname, self.port)
 
     def get_servers(self):
@@ -43,6 +59,10 @@ class UnrealMasterServer(object):
         # or server clients), need a header of 4 \xFF bytes
 
         command = b"\\list\\gamename\\ut\\final\\"
+
+        self.logger.debug(
+            f'Sending command \'\\{command}\\\' to {self.hostname}:{self.port}'
+        )
 
         self.sock.connect(self.server)
         self.sock.sendto(command, self.server)
@@ -60,12 +80,18 @@ class UnrealMasterServer(object):
         except socket.timeout as e:
             raise e
 
+        self.logger.debug(f'Raw data received:\n\n{fullmsg}')
+
         data = fullmsg.split('\\')[5:]
 
         for item in data[1::2][:-1]:
             self.servers.append(
-                UnrealServer(item.split(':')[0], int(item.split(':')[1]))
+                UnrealServer(item.split(':')[0], int(item.split(':')[1]), logger=self.logger)
             )
+
+        self.logger.info(
+            f'Found {len(self.servers)} servers running.'
+        )
 
     def search_servers(self, query):
         """
@@ -82,16 +108,22 @@ class UnrealMasterServer(object):
 
         return_list = []
 
+        self.logger.info(
+            f'Searching {len(self.servers)} servers for keyword \'{query}\'.'
+        )
+
         for server in self.servers:
-            info_results = (
-                [
-                    key for key, val in server.info.items() if re.search(
-                        query,
-                        val,
-                        re.IGNORECASE
-                    )
-                ]
-            )
+            self.logger.info(f"Scanning {server} for keyword.")
+            self.logger.debug(f"{pformat(server.info)}")
+
+            info_results = [
+                key for key, val in server.info.items() 
+                if re.search(
+                    query,
+                    str(val),
+                    re.IGNORECASE
+                )
+            ]
 
             if info_results:
                 return_list.append(server)
@@ -109,7 +141,7 @@ class UnrealMasterServer(object):
         """
 
         def get_server_info(server):
-            server.get_info()
+            server.poll_server()
 
         with concurrent.futures.ThreadPoolExecutor() as executor:
             executor.map(get_server_info, self.servers)
