@@ -149,7 +149,9 @@ class UnrealServer(object):
         self
     ):
 
-        self.logger.info(f'Polling server: {self.ip}:{self.port} {self.title or ""}')
+        self.logger.info(
+            f'Polling server: {self.ip}:{self.port} {self.title or ""}'
+        )
 
         try:
             self.get_data('status')
