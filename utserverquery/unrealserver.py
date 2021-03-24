@@ -1,6 +1,8 @@
 import socket
 from pprint import pformat
 
+from pdb import set_trace as st
+
 # Setup Logger
 import logging
 logger = logging.getLogger(__name__)
@@ -62,16 +64,37 @@ class UnrealServer(object):
             return None
 
 
+    @property
+    def has_xserver_query(self):
+
+        if 'XServerQuery' in self.info:
+            return True
+        else:
+            return False
+
+
     def get_data(
         self,
-        command
+        command,
+        use_xserver_query=True,
     ):
         """
             Poll the server for the information header and apply to the class
             attribute of 'info'
 
+            Kwargs:
+                use_xserver_query (bool): Append xserverquery to the command
+                automatically. This shouldn't affect a vanilla server.
+                XServerQuery module (tested against v2.0.1) provides a lot
+                more server detail about current match, players and score.
+                Pass False if it causes issues with any other ServerActor
+                replacement libraries.
+
             Returns: None
         """
+
+        if use_xserver_query:
+            command += '\\xserverquery'
 
         self.logger.debug(
             f'Sending command \'\\{command}\\\' to {self.ip}:{self.port}'
@@ -79,15 +102,21 @@ class UnrealServer(object):
 
         self.sock.sendto(str.encode(f"\\{command}\\"), self.server)
 
+        data = []
 
-        msg, _ = self.sock.recvfrom(4096)
+        while True:
+            
+            msg, _ = self.sock.recvfrom(4096)
 
-        try:
-            data = msg.decode('utf-8').split('\\')[1:-2]
-        except UnicodeDecodeError:
-            return
+            self.logger.debug(f'Raw data received:\n{msg}\n')
 
-        self.logger.debug(f'Raw data received:\n{data}\n')
+            try:
+                data.extend(msg.decode('utf-8').split('\\')[1:-2]) 
+            except UnicodeDecodeError:
+                return
+
+            if msg.split(b'\\')[-2] == b'final':
+                break
 
         elements = zip(data[::2], data[1::2])
 
@@ -123,9 +152,7 @@ class UnrealServer(object):
         self.logger.info(f'Polling server: {self.ip}:{self.port} {self.title or ""}')
 
         try:
-            self.get_server_info()
-            self.get_server_rules()
-            self.get_server_players()
+            self.get_data('status')
         except socket.timeout:
             self.logger.debug(
                 f'Timeout ({self.timeout} seconds) receiving data from '
